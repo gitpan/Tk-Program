@@ -3,8 +3,8 @@
 use strict;
 use lib '../.';
 use Tk;
-use Tk::Program; 
-
+use Tk::Program;
+use Tk::ROText;
 my $status = {
 	One => 'Status one',
 	Full => 'Full sentence ....',
@@ -53,6 +53,19 @@ $mw->repeat(999, sub{
 foreach (sort keys %$status) {
 	$mw->add_status($_, \$status->{$_}) ;
 }
+
+# Add Button to toolbar
+$mw->add_toolbar('Button', -text  => 'Button', -tip   => 'tool tip', -command => sub { print "hi\n" });
+$mw->add_toolbar('Label', -text  => 'Label');
+$mw->add_toolbar('separator');
+$mw->add_toolbar('Entry', -text => 'Entry');
+$mw->add_toolbar('LabEntry', -label => 'Label', -text => 'Laber');
+
+# MainFrame
+my $t = $mw->Subwidget('main')->Scrolled('ROText')->pack(
+		-expand => 1, 
+		-fill => 'both'); 
+$t->insert('end', `cat $0`);
 
 # Splash for 2000 Milliseconds
 $mw->splash( 2000 );

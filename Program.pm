@@ -2,8 +2,8 @@ package Tk::Program;
 #------------------------------------------------
 # automagically updated versioning variables -- CVS modifies these!
 #------------------------------------------------
-our $Revision           = '$Revision: 1.1 $';
-our $CheckinDate        = '$Date: 2003/06/04 17:14:35 $';
+our $Revision           = '$Revision: 1.5 $';
+our $CheckinDate        = '$Date: 2003/06/06 16:48:11 $';
 our $CheckinUser        = '$Author: xpix $';
 # we need to clean these up right here
 $Revision               =~ s/^\$\S+:\s*(.*?)\s*\$$/$1/sx;
@@ -24,6 +24,7 @@ use Tk::Balloon;
 use Tk::Getopt;
 use Tk::Splashscreen; 
 use Tk::Pod;
+use Tk::ToolBar;
 
 Construct Tk::Widget 'Program';
 
@@ -47,14 +48,16 @@ sub Populate {
 		-init_prefs	=> ["METHOD", 	"init_prefs", 	"Init_Prefs", 	undef],
 		-init_main	=> ["METHOD", 	"init_main", 	"Init_Main", 	undef],
 		-init_status	=> ["METHOD", 	"init_status", 	"Init_Status", 	undef],
+
 		-add_status	=> ["METHOD", 	"add_status", 	"Add_Status", 	undef],
+		-add_toolbar	=> ["METHOD", 	"add_toolbar", 	"Add_Toolbar", 	undef],
 
 		-skin		=> ["METHOD", 	"skin", 	"Skin", 	undef],
 		-prefs		=> ["METHOD", 	"prefs", 	"Prefs", 	undef],
 		-splash		=> ["METHOD", 	"splash", 	"Splash", 	undef],
            	);
 	
-	$obj->bind( "<Configure>", sub{ $obj->{opt}->{'geometry'} = $obj->geometry } );
+	$obj->bind( "<Configure>", sub{ $obj->{opt}->{'Geometry'} = $obj->geometry } );
 	$obj->bind( "<Destroy>", sub{ $obj->{optobj}->save_options() } );
 	$obj->bind( "<Double-Escape>", sub { exit } );
 
@@ -63,7 +66,6 @@ sub Populate {
 	$obj->configure(-title 	=> $obj->{app});
 
 	$obj->init_menu();
-	$obj->init_prefs();
 	$obj->init_main();
 	$obj->init_status();
 
@@ -73,7 +75,7 @@ sub Populate {
 	$obj->Advertise('main' => $obj->{main});
 	$obj->Advertise('status' => $obj->{status});
 
-	$obj->{balloon} = $obj->Balloon();
+	$obj->init_prefs();
 	$obj->update;
 }
 
@@ -106,9 +108,17 @@ sub splash {
 	} elsif(defined $obj->{logo} or defined $text) {
 		$obj->{splash} = $obj->Splashscreen;
 
-		$obj->{splash}->Label(
-			-image => $obj->Photo( -file => $obj->{logo} ) 
-			)->pack()	if($obj->{logo}); 
+		if($obj->{logo} !~ /\n/) {
+			$obj->{splash}->Label(
+				-image => $obj->Photo( -file => $obj->{logo} ),
+			)->pack(); 
+		} elsif($obj->{logo}) {
+			$obj->{splash}->Label(
+				-image => $obj->Photo( 
+					-data => $obj->{logo}, 
+					),
+				)->pack(); 
+		}
 
 		$obj->{splash}->Label(
 			-textvariable => $text,  
@@ -169,6 +179,23 @@ sub init_status {
 }
 
 # ------------------------------------------
+sub add_toolbar {
+# ------------------------------------------
+	my $obj = shift || return error('No Object');
+	my $typ = shift || return error('No Type!');
+	my @par = @_;
+
+	unless(defined $obj->{toolbar}) {
+		$obj->{toolbar} = $obj->ToolBar(
+			-movable => 1,
+			-side => 'top',
+			);
+	}
+	$obj->{toolbar}->$typ(@par);
+}
+
+
+# ------------------------------------------
 sub add_status {
 # ------------------------------------------
 	my $obj = shift || return error('No Object');
@@ -200,10 +227,12 @@ sub init_prefs {
 	return $obj->{optobj} if defined $obj->{optobj}; 
 
 	my $optionen = shift || $obj->get_prefs($obj->{add_prefs});
-	
+	my %opts;
+	$obj->{opt} = \%opts;
+		
 	$obj->{optobj} = Tk::Getopt->new(
 			-opttable => $optionen,
-			-options => $obj->{opt},
+			-options => \%opts,
 			-filename => $obj->{cfg}
 		);
 	$obj->{optobj}->set_defaults;
@@ -212,7 +241,7 @@ sub init_prefs {
 	    die $obj->{optobj}->usage;
 	}
 	$obj->{optobj}->process_options;
-	return $obj->{optobj};
+	return $obj->{opt};
 }
 
 # ------------------------------------------
@@ -220,18 +249,24 @@ sub get_prefs {
 # ------------------------------------------
 	my $obj = shift || return error('No Object');
 	my $to_add = shift || [];
+
+	if(! ref $to_add and -e $to_add) {
+		$to_add = $obj->load_config($to_add);		
+	}
+
+
 	my $default = 
 	[
 		'Display',
-		['Geometry', '=s', undef,
+		['Geometry', '=s', '640x480',
 		    'help' => 'Set geometry from Programm',
 		    'subtype' => 'geometry',
-			'callback' => sub {    	
+		    'callback' => sub {    	
 				if (my $geo = $obj->{opt}->{'Geometry'}) {
 					$obj->geometry($geo);
 					$obj->update;
 				}
-			},
+		     },
    		], 
 		['Color', '=s', 'gray85',
 		    'help' => 'Set color palette to Program',
@@ -244,14 +279,25 @@ sub get_prefs {
 			},
    		], 
    		['Font', '=s', 'Helvetica 10 normal',
+			'callback-interactive' => sub{
+					$obj->messageBox(
+						-message => 'You need a restart from this Program!', 
+						-title => 'My title', 
+						-type => 'Ok', 
+						-default => 'Ok');
+					$obj->{optobj}->save_options();
+			},
 			'callback' => sub {    	
 				if (my $font = $obj->{opt}->{'Font'}) {
 					$obj->optionAdd("*font", $font);
 					$obj->optionAdd("*Font", $font);
-					if($obj->{menu}) {
-						$obj->{menu}->configure(-font => $font);
-						$obj->{menu}->update;
-					}
+					$obj->Walk( 
+						sub { 
+							#XXX Uiee, böser Hack ;-)
+							if( exists $_[0]->{Configure}->{'-font'} ) {
+								$_[0]->configure(-font => $font) 
+							} 
+						} );
 					$obj->update;
 				}
 			},
@@ -290,13 +336,40 @@ sub init_menu {
 		$obj->{menu} = $obj->Menu(
 			-menuitems => $menuitems,
 			-tearoff => 0,
+			-font => $obj->{opt}->{Font},
 			);
 		$obj->configure(-menu => $obj->{menu});
 	} else {
 		$obj->{menu} = $obj->Menubutton(-text => "Pseudo menubar",
 				 	 -menuitems => $menuitems)->pack;
 	}
+
 	return $obj->{menu};
+}
+
+# ------------------------------------------
+sub load_config {
+# ------------------------------------------
+	my $obj = shift || return error('No Object');
+	my $file = shift || return error('No Configfile');
+
+	my @VAR = eval( _load_file($file) ); 
+
+	return \@VAR;
+}
+
+#--------------------------------------------------------
+sub _load_file {
+#--------------------------------------------------------
+	my $file = shift || die "Kein File bei Loader $!";
+	my $fh = IO::File->new("< $file") 
+	    or return debug("Can't open File $file $! ");
+	my $data;
+	while ( defined (my $l = <$fh>) ) {
+	        $data .= $l;
+	}
+	$fh->close;
+	return $data;
 }
 
 
@@ -319,33 +392,35 @@ Tk::Program - MainWindow Widget with special features.
 
 =head1 SYNOPSIS
 
-  use Tk;
-  use Tk::Program;
-
-  my $top = Tk::Program->new(
-	-app => 'xpix',
-	-cfg => './testconfig.cfg',
-	-icon	=> './icon.gif',
-	-logo => './logo.gif',
-	-about => \$about,
-	-help => '../Tk/Program.pm',
-  	-add_prefs => [
-		'Tools',
+	use Tk;
+	use Tk::Program;
+	
+	my $top = Tk::Program->new(
+		-app => 'xpix',
+		-cfg => './testconfig.cfg',
+		-icon => './icon.gif',
+		-logo => './logo.gif',
+		-about => \$about,
+		-help => '../Tk/Program.pm',
+		-add_prefs => [
+			'Tools',
 			['acrobat', '=s', '/usr/local/bin/acroread',
-			{	'subtype' => 'file',
-				'help' => 'Path to acrobat reader.'
+			{ 'subtype' => 'file',
+			'help' => 'Path to acrobat reader.'
 			} ],
-  	],
-  );
-
-  MainLoop;
+		],
+	);
+	
+	MainLoop;
 
 =head1 DESCRIPTION
 
-This  is  a  megawidget to  display  a  program window.  I  was  tyred in  every
-application  to   create a   menu,  prefs  dialog,  about  .... I  search  for a
-standard way and  write this module.  This remember the  font, size and  postion
-from the Mainwindow and use also the function from Tk::Mainwindow.
+This  is  a  megawidget to  display  a  program window. I was tired of creating 
+menues, prefs dialogues, about dialogues,... for every new application..... I 
+searched for a generic way wrote this module. This modules stores the main 
+window's font, size and position and embodies the fucntions from the 
+Tk::Mainwindow module.
+
 
 =head1 WIDGET-SPECIFIC OPTIONS
 
@@ -361,29 +436,33 @@ Set a Application Icon, please give this in 32x32 pixel and in gif format.
 
 Set the path to the config file, default:
 
-  	$HOME/.$Application_Name.cfg
+   $HOME/.$Application_Name.cfg
 
-=head2 -add_prefs => $arrey_ref_more_prefs;
+=head2 -add_prefs => $arrey_ref_more_prefs or $path_to_cfg_file;
 
-This allow mor Preferences as the default:
+This allows to include your Preferences into default:
 
-  	-add_prefs => [
-		'Tools',
-			['acrobat', '=s', '/usr/local/bin/acroread',
-			{	'subtype' => 'file',
-				'help' => 'Path to acrobat reader.'
-			} ],
-  	],
+   -add_prefs => [
+	  'Tools',
+	   ['acrobat', '=s', '/usr/local/bin/acroread',
+	   { 'subtype' => 'file',
+	    'help' => 'Path to acrobat reader.'
+	   } ],
+   ],
 
+Also you can use a config file as parameter:
+
+   -add_prefs => $path_to_cfg_file;
 
 =head2 -logo => $image_file;
 
-One logo for one program ;-) This picture will use from Splash and About Method. 
-Carefully, if this not defined in Splash then returnd this with an error.
+One logo for one program  This picture will be use from the Splash and About
+Method.
+Carefully, if  not defined in the Splash then an error is returned.
 
 =head2 -help => $pod_file;
 
-This include a Help function as a topwindow with Poddisplay. Look for more 
+This includes a Help function as a topwindow with Poddisplay. Look for more
 Information on Tk::Pod. Default is the program source ($0).
 
 
@@ -393,9 +472,10 @@ These are the methods you can use with this Widget.
 
 =head2 $top->init_prefs( I<$prefs> );
 
-This will initialize the user or default preferences. This returnd a 
-Prefsobject. More information about the prefsobject look on B<Tk::Getopt> from 
-slaven. The Program with use  this Module have a  configuration dialog in tk 
+This will initialize the user or default preferences. It returns a
+reference  to the options hash. More information about the prefsobject look at
+B<Tk::Getopt> from
+slaven. The Program which uses  this Module has a  configuration dialog in tk
 and on the commandline with the following standard options:
 
 =over 4
@@ -413,8 +493,8 @@ In the Standard menu you find the preferences dialog under I<File - Prefs>.
 I.E.:
 
 	my $opt = $top->init_prefs();
-	$opt->save_options;
-	....	
+	print $opt->{Geometry};
+	....
 
 =head2 $top->prefs();
 
@@ -422,39 +502,52 @@ Display the Configuration dialog.
 
 =head2 $top->init_menu( I<$menuitems> );
 
-Initialize the user or default Menu and returnd the Menuobject. You can set your 
-own menu with the first parameter. the other (clever) way, you add your own menu 
-to the standart menu. 
+Initialize the user or default Menu and return the Menuobject. You can set
+your own menu with the first parameter. the other (clever) way: you add your own
+menu to the standart menu.
 I.E:
 
 	# New menu item
 	my $edit_menu = $mw->Menu();
-	$edit_menu->command(-label => '~Copy', -command => sub{ print "Choice Copy \n" });
-	$edit_menu->command(-label => '~Cut', -command => sub{ print "Choice Cut \n" });
-	# ....	
-
+	$edit_menu->command(-label => '~Copy', -command => sub{ print "Choice Copy\n" });
+	$edit_menu->command(-label => '~Cut', -command => sub{ print "Choice Cut\n" });
+	# ....
+	
 	my $menu = $mw->init_menu();
 	$menu->insert(1, 'cascade', -label => 'Edit', -menu => $edit_menu);
 
 
 =head2 $top->splash( I<$milliseconds> );
 
-Display the  Splashscreen for  (optional) x  milliseconds. The  -logo option  is 
-required to initialize with a Picture. Also you can this use as Switch,  without 
-Parameter:
+Display the  Splashscreen for  (optional) x  milliseconds. The  -logo option
+is
+required to initialize with a Picture. Also you can use this as Switch,
+without any Parameter:
 
-  	$top->splash();	# Splash on
-  	....
-  	working
-  	...
-  	$top->splash(); # Splash off
-  	
+	$top->splash(); # Splash on
+	....
+	working
+	...
+	$top->splash(); # Splash off
+
+=head2 $top->add_toolar( I<$typ>, I<$options> );
+
+Display the ToolbarWidget at first call and include the Widget ($typ) with options ($options):
+
+	# Add Button to toolbar
+	$mw->add_toolbar('Button', 
+		-text  => 'Button', 
+		-tip   => 'tool tip', 
+		-command => sub { print "hi\n" });
+	$mw->add_toolbar('Label', -text  => 'Label');
+	$mw->add_toolbar('separator');
+
+Look for more Information on Tk::ToolBar.
 
 
 =head1 ADVERTISED WIDGETS
 
-You can use the advertice widget with the following command I<$top-
->Subwidget('name_from_adv_widget')>.
+You can use the advertise widget with the following command '$top->Subwidget('name_from_adv_widget')'.
 
 =head2 B<menu>: Menubar
 
@@ -464,9 +557,28 @@ You can use the advertice widget with the following command I<$top-
 
 =head2 B<status_I<name>>: StatusEntry from $top->add_status
 
+=head1 BINDINGS
+
+=head2 I<Double-Escape>: Exit the Programm
+
 =head1 CHANGES
 
   $Log: Program.pm,v $
+  Revision 1.5  2003/06/06 16:48:11  xpix
+  * add toolbar function
+  ! liitle bugfix in change font
+
+  Revision 1.4  2003/06/06 12:56:03  xpix
+  * correct docu, thanks on susy ;-)
+
+  Revision 1.3  2003/06/05 15:32:26  xpix
+  * with new Module Tk::Program
+  ! unitialized values in tm2unix
+
+  Revision 1.2  2003/06/05 12:51:56  xpix
+  ! add better docu
+  * add help function
+
   Revision 1.1  2003/06/04 17:14:35  xpix
   * New Modul for standart way to build a Programwindow.
 
@@ -482,5 +594,3 @@ modify it under the same terms as Perl itself.
 =head1 KEYWORDS
 
 Tk, Tk::MainWindow
-
-__END__
