@@ -2,8 +2,8 @@ package Tk::Program;
 #------------------------------------------------
 # automagically updated versioning variables -- CVS modifies these!
 #------------------------------------------------
-our $Revision           = '$Revision: 1.5 $';
-our $CheckinDate        = '$Date: 2003/06/06 16:48:11 $';
+our $Revision           = '$Revision: 1.7 $';
+our $CheckinDate        = '$Date: 2003/06/20 13:53:18 $';
 our $CheckinUser        = '$Author: xpix $';
 # we need to clean these up right here
 $Revision               =~ s/^\$\S+:\s*(.*?)\s*\$$/$1/sx;
@@ -23,8 +23,11 @@ use IO::File;
 use Tk::Balloon;
 use Tk::Getopt;
 use Tk::Splashscreen; 
-use Tk::Pod;
 use Tk::ToolBar;
+use Tk::DialogBox;
+use Tk::ROText;
+
+use Data::Dumper;
 
 Construct Tk::Widget 'Program';
 
@@ -34,16 +37,17 @@ sub Populate {
 	my ($obj, $args) = @_;
 
 	$obj->{app} 		= delete $args->{'-app'} 	|| 'Program';
-	$obj->{icon} 		= delete $args->{'-icon'} 	|| undef;
 	$obj->{cfg} 		= delete $args->{'-cfg'} 	|| sprintf( '%s/.%s.cfg', ($ENV{HOME} ? $ENV{HOME} : $ENV{HOMEDRIVE}.$ENV{HOMEPATH}), $obj->{app} );
 	$obj->{add_prefs} 	= delete $args->{'-add_prefs'};
-	$obj->{logo} 		= delete $args->{'-logo'};
 	$obj->{about} 		= delete $args->{'-about'};
 	$obj->{help} 		= delete $args->{'-help'}	|| $0;
 
 	$obj->SUPER::Populate($args);
 	
 	$obj->ConfigSpecs(
+		-set_logo	=> ["METHOD", 	"set_logo", 	"Set_Logo", 	undef],
+		-set_icon	=> ["METHOD", 	"set_icon", 	"Set_Icon", 	undef],
+
 		-init_menu	=> ["METHOD", 	"init_menu", 	"Init_Menu", 	undef],
 		-init_prefs	=> ["METHOD", 	"init_prefs", 	"Init_Prefs", 	undef],
 		-init_main	=> ["METHOD", 	"init_main", 	"Init_Main", 	undef],
@@ -52,14 +56,18 @@ sub Populate {
 		-add_status	=> ["METHOD", 	"add_status", 	"Add_Status", 	undef],
 		-add_toolbar	=> ["METHOD", 	"add_toolbar", 	"Add_Toolbar", 	undef],
 
+		-config		=> ["METHOD", 	"config", 	"Config", 	undef],
 		-skin		=> ["METHOD", 	"skin", 	"Skin", 	undef],
 		-prefs		=> ["METHOD", 	"prefs", 	"Prefs", 	undef],
 		-splash		=> ["METHOD", 	"splash", 	"Splash", 	undef],
+		-exit		=> ["METHOD", 	"exit", 	"Exit", 	undef],
+
+		-exit_cb	=> ["CALLBACK",	"exit_cb", 	"Exit_Cb", 	undef],
            	);
 	
 	$obj->bind( "<Configure>", sub{ $obj->{opt}->{'Geometry'} = $obj->geometry } );
 	$obj->bind( "<Destroy>", sub{ $obj->{optobj}->save_options() } );
-	$obj->bind( "<Double-Escape>", sub { exit } );
+	$obj->bind( "<Double-Escape>", sub { $obj->exit } );
 
 	$obj->Icon('-image' => $obj->Photo( -file => $obj->{icon} ) ) if($obj->{icon});
 	$obj->optionAdd("*tearOff", "false");
@@ -80,11 +88,57 @@ sub Populate {
 }
 
 # ------------------------------------------
+sub exit {
+# ------------------------------------------
+	my $obj = shift || return error('No Object');
+	$obj->Callback(-exit_cb);
+	$obj->{optobj}->save_options();
+	exit; 
+}
+
+# ------------------------------------------
+sub set_icon {
+# ------------------------------------------
+	my $obj = shift || return error('No Object');
+	$obj->{icon} = shift || return $obj->{icon};
+	
+	my $image = $obj->{icon};
+	$image = $obj->Photo( -file => $obj->{icon} )
+			unless(ref $obj->{icon});
+	$obj->Icon('-image' => $image );
+}
+
+
+# ------------------------------------------
+sub set_logo {
+# ------------------------------------------
+	my $obj = shift || return error('No Object');
+	$obj->{logo} = shift || $obj->{logo};
+
+	my $image = $obj->{logo};
+	$image = $obj->Photo( -file => $obj->{logo} )
+			unless(ref $obj->{logo});
+	return $image;
+}
+
+# ------------------------------------------
 sub help {
 # ------------------------------------------
 	my $obj = shift || return error('No Object');
-	
-	$obj->Pod(-file => $obj->{help}, -tree => 0);	
+	unless(defined $obj->{pod_text}) {
+		$obj->{pod_text} = `pod2text $0`;
+	}	
+	$obj->{pod_window}->{dialog} = my $dialog = $obj->DialogBox(
+		-title          => sprintf('Help for %s:', $obj->{app}),
+		-buttons        => [ 'Ok' ],
+		-default_button => 'Ok'
+	);
+	my $e = $dialog->add(
+		'ROText',
+	)->pack;
+	$e->insert('end', $obj->{pod_text});
+
+	my $answer = $dialog->Show;
 }
 
 # ------------------------------------------
@@ -108,17 +162,9 @@ sub splash {
 	} elsif(defined $obj->{logo} or defined $text) {
 		$obj->{splash} = $obj->Splashscreen;
 
-		if($obj->{logo} !~ /\n/) {
-			$obj->{splash}->Label(
-				-image => $obj->Photo( -file => $obj->{logo} ),
+		$obj->{splash}->Label(
+			-image => $obj->set_logo,
 			)->pack(); 
-		} elsif($obj->{logo}) {
-			$obj->{splash}->Label(
-				-image => $obj->Photo( 
-					-data => $obj->{logo}, 
-					),
-				)->pack(); 
-		}
 
 		$obj->{splash}->Label(
 			-textvariable => $text,  
@@ -128,7 +174,7 @@ sub splash {
 		$obj->{splash}->Destroy( $mseconds );
 		return $obj->{splash};
 	} else {
-		return error('Can\'t find a logo. Please define first -logo!');
+		return error('Can\'t find a logo. Please define first -set_logo!');
 	}
 
 }
@@ -179,6 +225,25 @@ sub init_status {
 }
 
 # ------------------------------------------
+sub config {
+# ------------------------------------------
+	my $obj = shift || return error('No Object');
+	my $name = shift;
+	my $cfg = shift;
+
+	$obj->{'UserCfg'} = {}
+		unless(ref $obj->{'UserCfg'});
+
+	return $obj->{'UserCfg'}->{$name}
+		unless( $cfg );	
+
+	$obj->{'UserCfg'}->{$name} = $cfg;	
+	$obj->{opt}->{'UserCfg'} = Data::Dumper->Dump([$obj->{'UserCfg'}]);
+	$obj->{optobj}->save_options;
+	return $obj->{'UserCfg'}->{$name};
+}
+
+# ------------------------------------------
 sub add_toolbar {
 # ------------------------------------------
 	my $obj = shift || return error('No Object');
@@ -201,22 +266,32 @@ sub add_status {
 	my $obj = shift || return error('No Object');
 	my $name = shift || return error('No Name');
 	my $value = shift || return error('No Value');
+	my $w;
 
-        return $obj->{status}->{$name} if(defined $obj->{status}->{$name});
+        return $obj->{status}->{$name} 
+        	if(defined $obj->{status}->{$name});
 	
 	$obj->{status} = $obj->init_status()
 		unless(defined $obj->{status});
 
-	my $w = $obj->{status}->Label(
-		-textvariable => $value,
-		-relief => 'sunken',
-		-borderwidth => 2,
-		-padx => 5,
-		-anchor => 'w')->pack(
-			-side => 'left', 
-			-fill => 'x', 
-			-expand => 1,
-			);
+	if(ref $$value) {
+		$w = $$value->pack(
+				-side => 'left', 
+				-fill => 'x', 
+				-expand => 1,
+				);
+	} else {
+		$w = $obj->{status}->Label(
+			-textvariable => $value,
+			-relief => 'sunken',
+			-borderwidth => 2,
+			-padx => 5,
+			-anchor => 'w')->pack(
+				-side => 'left', 
+				-fill => 'x', 
+				-expand => 1,
+				);
+	}
 	$obj->Advertise('status_'.$name => $w); 
 }
 
@@ -281,7 +356,7 @@ sub get_prefs {
    		['Font', '=s', 'Helvetica 10 normal',
 			'callback-interactive' => sub{
 					$obj->messageBox(
-						-message => 'You need a restart from this Program!', 
+						-message => 'Please restart program to apply changes!', 
 						-title => 'My title', 
 						-type => 'Ok', 
 						-default => 'Ok');
@@ -304,6 +379,16 @@ sub get_prefs {
 			'subtype' => 'font',
 			'help' => 'Default font',
 		],
+		['UserCfg', '=s', undef,
+		 'nogui' => 1,
+		 'callback' => sub {    	
+			if (my $str = $obj->{opt}->{'UserCfg'}) {
+				my $VAR1;
+				$obj->{'UserCfg'} = eval($str);
+				return error($@) if($@);
+			}
+		 },
+   		], 
 		@$to_add
 	];
 	return $default;
@@ -318,7 +403,7 @@ sub init_menu {
 		[Cascade => "File", -menuitems =>
 			[
 				[Button => "Prefs", 	-command => sub{ $obj->prefs() } ],
-				[Button => "Quit", 	-command => sub{ exit }],
+				[Button => "Quit", 	-command => sub{ $obj->exit }],
 			]	
 		],	
 		
@@ -398,8 +483,8 @@ Tk::Program - MainWindow Widget with special features.
 	my $top = Tk::Program->new(
 		-app => 'xpix',
 		-cfg => './testconfig.cfg',
-		-icon => './icon.gif',
-		-logo => './logo.gif',
+		-set_icon => './icon.gif',
+		-set_logo => './logo.gif',
 		-about => \$about,
 		-help => '../Tk/Program.pm',
 		-add_prefs => [
@@ -428,7 +513,7 @@ Tk::Mainwindow module.
 
 Set a Application name, default is I<Program>
 
-=head2 -icon => $Path_to_icon_image
+=head2 -set_icon => $Path_to_icon_image
 
 Set a Application Icon, please give this in 32x32 pixel and in gif format.
 
@@ -454,7 +539,7 @@ Also you can use a config file as parameter:
 
    -add_prefs => $path_to_cfg_file;
 
-=head2 -logo => $image_file;
+=head2 -set_logo => $image_file;
 
 One logo for one program  This picture will be use from the Splash and About
 Method.
@@ -500,6 +585,15 @@ I.E.:
 
 Display the Configuration dialog.
 
+=head2 $top->set_icon( I<$path_to_icon> );
+
+Set a new Icon at runtime.
+
+=head2 $top->set_logo( I<$path_to_logo> );
+
+Set a new Logo at runtime.
+
+
 =head2 $top->init_menu( I<$menuitems> );
 
 Initialize the user or default Menu and return the Menuobject. You can set
@@ -519,7 +613,7 @@ I.E:
 
 =head2 $top->splash( I<$milliseconds> );
 
-Display the  Splashscreen for  (optional) x  milliseconds. The  -logo option
+Display the  Splashscreen for  (optional) x  milliseconds. The  -set_logo option
 is
 required to initialize with a Picture. Also you can use this as Switch,
 without any Parameter:
@@ -529,6 +623,34 @@ without any Parameter:
 	working
 	...
 	$top->splash(); # Splash off
+
+=head2 $top->config( I<Name>, I<$value> );
+
+You have data from your widgets and you will make this data persistent? No Problem:
+
+	$top->config( 'Info', $new_ref_with_importand_informations )
+	...
+	my $info = $top->config( 'Info' );	
+
+=head2 $top->add_status( I<$name>, I<\$value> or I<\$widget> );
+
+Display a Status text field or a widget in the status bar, if you first call 
+add_status then will Tk::Program create a status bar:
+
+	my $widget = $mw->init_status()->Entry();
+	$widget->insert('end', 'Exampletext ....');
+	
+	my $status = {
+		One => 'Status one',
+		Full => 'Full sentence ....',
+		Time => sprintf('%d seconds', time),
+		Widget => $widget, 
+	};
+	
+	# Add Status fields
+	foreach (sort keys %$status) {
+		$mw->add_status($_, \$status->{$_}) ;
+	}
 
 =head2 $top->add_toolar( I<$typ>, I<$options> );
 
@@ -544,6 +666,13 @@ Display the ToolbarWidget at first call and include the Widget ($typ) with optio
 
 Look for more Information on Tk::ToolBar.
 
+=head2 $top->exit( );
+
+Close the program, you can include your code (before call the exit command) with:
+
+	...
+	$mw->configure(-exit_cb => sub{ .... })
+	$mw->exit;
 
 =head1 ADVERTISED WIDGETS
 
@@ -564,6 +693,12 @@ You can use the advertise widget with the following command '$top->Subwidget('na
 =head1 CHANGES
 
   $Log: Program.pm,v $
+  Revision 1.7  2003/06/20 13:53:18  xpix
+  ! wrong english in font dialog ;-)
+
+  Revision 1.6  2003/06/20 12:52:27  xpix
+  ! change from Tk::Pod to standart way with ROText
+
   Revision 1.5  2003/06/06 16:48:11  xpix
   * add toolbar function
   ! liitle bugfix in change font
